@@ -1,0 +1,12 @@
+int ch; \n \n \n
+    while(ch=(fgetc(copia))!=EOF)
+    {
+        if(ch='\n')
+        {   
+            fseek(copia,-1,SEEK_CUR);
+            fputc('\r',copia);
+            fflush(copia);
+        }
+
+        fputc(ch,copia);
+    }

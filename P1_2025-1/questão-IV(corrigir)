@@ -1,0 +1,86 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+struct temporalCasosCovid
+{
+	int dia;
+	int novosCasos;
+	int obitos;
+} typedef tempCovid;
+
+
+void swap(FILE* a, FILE* b) {
+    FILE t = *a;
+    *a = *b;
+    *b = t;
+}
+
+
+int partition(FILE* f, int baixo, int alto) {
+    FILE pivo = f[alto]; 
+    int i = (baixo - 1);  
+
+    for (int j = baixo; j <= alto - 1; j++) {
+        
+        if (arr[j] < pivo) {
+            i++;
+            swap(&f[i], &f[j]);
+        }
+    }
+    swap(&f[i + 1], &f[alto]);
+    return (i + 1);
+}
+
+
+void quickSort(FILE f, int baixo, int alto) {
+    if (baixo < alto) {
+        
+        int pi = partition(f, baixo, alto);
+
+        quickSort(f, baixo, pi - 1);
+        quickSort(f, pi + 1, alto);
+    }
+}
+
+
+int main(int argc, char** argv)
+{
+	FILE* file1 = fopen(argv[1],"ab");
+	FILE* file2 = fopen(argv[2],"rb");
+	
+	if(file1 == NULL || file2 == NULL) 
+	{
+	    perror("falha ao abrir os arquivos");
+	    return 1;
+	}
+
+	fseek(file1,0,SEEK_END);fseek(file2,0,SEEK_END);
+	
+	int tamArq1 = ftell(file1);
+	int tamArq2 = ftell(file2);
+	int tamReg  = sizeof(tempCovid);
+	int qtdReg1 = tamArq1/tamReg;
+	int qtdReg2 = tamArq2/tamReg;
+	
+	rewind(file1);rewind(file2);
+	
+	char *buffer = (char*)malloc(tamArq2+1);
+	if(buffer == NULL)
+	{
+	    perror("falha em alocar memoria na buffer");
+	}
+	
+	fread(buffer,tamReg,1,file2); // Ler file2, mandar pra buffer 
+	fwrite(buffer,tamReg,1,file1);//escreve buffer na file1 em modo appendix 
+	//daqui pra cima, concatenação de 2 arquivos
+	fseek(file1,0,SEEK_END);
+	int maxArq = ftell(file1);
+	int tamArq = maxArq/tamReg;
+	rewind(file1);
+	quickSort(file1,0,tamArq);
+	
+	fclose(file1);fclose(file2);
+	
+	return 0;
+}
