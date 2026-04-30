@@ -25,6 +25,57 @@ int comparaIndice(const void *a, const void *b)
     return strncmp(((Indice *)a)->cep, ((Indice *)b)->cep, 8);
 }
 
+static void swap_bytes(char *a, char *b, size_t size)
+{
+    while (size--) {
+        char tmp = *a;
+        *a++ = *b;
+        *b++ = tmp;
+    }
+}
+
+static void qsort_recursive(char *base, long lo, long hi, size_t size,
+    int (*compar)(const void *, const void *))
+{
+    if (lo >= hi) {
+        return;
+    }
+
+    char *pivot = base + ((lo + hi) / 2) * size;
+    long i = lo;
+    long j = hi;
+
+    while (i <= j) {
+        while (compar(base + i * size, pivot) < 0) {
+            i++;
+        }
+        while (compar(base + j * size, pivot) > 0) {
+            j--;
+        }
+        if (i <= j) {
+            swap_bytes(base + i * size, base + j * size, size);
+            i++;
+            j--;
+        }
+    }
+
+    if (lo < j) {
+        qsort_recursive(base, lo, j, size, compar);
+    }
+    if (i < hi) {
+        qsort_recursive(base, i, hi, size, compar);
+    }
+}
+
+void qsort(void *base, size_t nmemb, size_t size,
+    int (*compar)(const void *, const void *))
+{
+    if (nmemb <= 1 || size == 0) {
+        return;
+    }
+    qsort_recursive((char *)base, 0, (long)nmemb - 1, size, compar);
+}
+
 int main(int argc, char** argv)
 {
     FILE* f = fopen("argv[1]","rb");
@@ -47,7 +98,7 @@ int main(int argc, char** argv)
         qt++;
     }
 
-    qsort(idx, qtdReg, sizeof(Indice), comparaIndice(0,qt));
+    qsort(idx, qtdReg, sizeof(Indice), comparaIndice);
     
     FILE* novo = fopen("cep_index.bin","wb");
 

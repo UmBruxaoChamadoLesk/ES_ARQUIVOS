@@ -19,6 +19,69 @@ int comparaIndice(const void *a, const void *b)
     return strncmp(((Endereco *)a)->cep, ((Endereco *)b)->cep, 8);
 }
 
+static void swap(void *a, void *b, size_t width)
+{
+    unsigned char *pa = a;
+    unsigned char *pb = b;
+    unsigned char tmp;
+
+    while (width--) {
+        tmp = *pa;
+        *pa++ = *pb;
+        *pb++ = tmp;
+    }
+}
+
+static void quicksort_rec(void *base, size_t low, size_t high, size_t width, int (*comp)(const void *, const void *))
+{
+    if (low >= high) {
+        return;
+    }
+
+    unsigned char *array = base;
+    size_t i = low;
+    size_t j = high;
+    unsigned char *pivot = array + ((low + high) / 2) * width;
+
+    while (i <= j) {
+        while (comp(array + i * width, pivot) < 0) {
+            i++;
+        }
+
+        while (comp(array + j * width, pivot) > 0) {
+            if (j == 0) {
+                break;
+            }
+            j--;
+        }
+
+        if (i <= j) {
+            swap(array + i * width, array + j * width, width);
+            i++;
+            if (j == 0) {
+                break;
+            }
+            j--;
+        }
+    }
+
+    if (j > low) {
+        quicksort_rec(base, low, j, width, comp);
+    }
+
+    if (i < high) {
+        quicksort_rec(base, i, high, width, comp);
+    }
+}
+
+void quicksort(void *base, size_t nel, size_t width, int (*comp)(const void *, const void *))
+{
+    if (!base || nel < 2 || width == 0 || comp == NULL) {
+        return;
+    }
+
+    quicksort_rec(base, 0, nel - 1, width, comp);
+}
 
 void intercala(Endereco *k, int qtdReg)
 {
@@ -57,7 +120,7 @@ int main(int argc, char **argv)
 
     fseek(f, 0, SEEK_SET);
     fread(k, tamReg, qtdReg, f);
-    qsort(k, qtdReg, sizeof(Endereco), comparaIndice(0, qtdReg));
+    quicksort(k, qtdReg, sizeof(Endereco), comparaIndice);
     intercala(k, qtdReg);
     FILE* novo = fopen("arquivoOrdenado.bin", "wb");
     fwrite(k, sizeof(Endereco), qtdReg, novo);
