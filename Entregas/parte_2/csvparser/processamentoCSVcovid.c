@@ -1,149 +1,160 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "CSVParser.h"
 
-#define MAX_FIELDS 200
-#define MAX_LINE 20000
 #define MAX_LOCATIONS 300
 #define MAX_NAME 128
+#define MAX_DATE 11
 
 typedef struct {
     char location[MAX_NAME];
-    char date[11];
+    char date[MAX_DATE];
     long double total_cases;
     long double total_deaths;
     int seen;
 } CountryStats;
 
-static int split_csv_line(char *line, char **fields, int max_fields) {
-    int count = 0;
-    int in_quotes = 0;
-    char *start = line;
-
-    fields[count++] = start;
-
-    for (char *p = line; *p != '\0'; ++p) {
-        if (*p == '"') {
-            in_quotes = !in_quotes;
-        } else if (*p == ',' && !in_quotes) {
-            *p = '\0';
-            if (count < max_fields) {
-                fields[count++] = p + 1;
-            }
-        }
-    }
-
-    return count;
-}
+typedef struct {
+    int continent_idx;
+    int location_idx;
+    int date_idx;
+    int cases_idx;
+    int deaths_idx;
+    int header_read;
+    CountryStats countries[MAX_LOCATIONS];
+    int country_count;
+} ProcessingContext;
 
 static int find_column_index(char **fields, int field_count, const char *name) {
     for (int i = 0; i < field_count; ++i) {
-        if (strcmp(fields[i], name) == 0) {
+        if (fields[i] != NULL && strcmp(fields[i], name) == 0) {
             return i;
         }
     }
     return -1;
 }
 
+static void copy_string(char *dest, size_t size, const char *src) {
+    if (src == NULL) {
+        src = "";
+    }
+
+    strncpy(dest, src, size - 1);
+    dest[size - 1] = '\0';
+}
+
 static int is_newer_date(const char *a, const char *b) {
     return strcmp(a, b) > 0;
 }
 
+static void process_row(char **fields, int field_count, void *userData) {
+    ProcessingContext *ctx = (ProcessingContext *)userData;
+
+    if (!ctx->header_read) {
+        ctx->continent_idx = find_column_index(fields, field_count, "continent");
+        ctx->location_idx = find_column_index(fields, field_count, "location");
+        ctx->date_idx = find_column_index(fields, field_count, "date");
+        ctx->cases_idx = find_column_index(fields, field_count, "total_cases");
+        ctx->deaths_idx = find_column_index(fields, field_count, "total_deaths");
+        ctx->header_read = 1;
+        return;
+    }
+
+    if (ctx->continent_idx < 0 || ctx->location_idx < 0 || ctx->date_idx < 0 ||
+        ctx->cases_idx < 0 || ctx->deaths_idx < 0) {
+        return;
+    }
+
+    if (ctx->continent_idx >= field_count || ctx->location_idx >= field_count ||
+        ctx->date_idx >= field_count || ctx->cases_idx >= field_count ||
+        ctx->deaths_idx >= field_count) {
+        return;
+    }
+
+    if (strcmp(fields[ctx->continent_idx], "South America") != 0) {
+        return;
+    }
+
+    const char *location = fields[ctx->location_idx];
+    const char *date = fields[ctx->date_idx];
+    const char *cases_str = fields[ctx->cases_idx];
+    const char *deaths_str = fields[ctx->deaths_idx];
+
+    int found = 0;
+    for (int i = 0; i < ctx->country_count; ++i) {
+        if (strcmp(ctx->countries[i].location, location) == 0) {
+            found = 1;
+            if (!ctx->countries[i].seen || is_newer_date(date, ctx->countries[i].date)) {
+                copy_string(ctx->countries[i].date, sizeof(ctx->countries[i].date), date);
+                ctx->countries[i].total_cases = cases_str[0] ? (long double)strtod(cases_str, NULL) : 0.0L;
+                ctx->countries[i].total_deaths = deaths_str[0] ? (long double)strtod(deaths_str, NULL) : 0.0L;
+                ctx->countries[i].seen = 1;
+            }
+            break;
+        }
+    }
+
+    if (!found) {
+        if (ctx->country_count >= MAX_LOCATIONS) {
+            return;
+        }
+
+        copy_string(ctx->countries[ctx->country_count].location, sizeof(ctx->countries[ctx->country_count].location), location);
+        copy_string(ctx->countries[ctx->country_count].date, sizeof(ctx->countries[ctx->country_count].date), date);
+        ctx->countries[ctx->country_count].total_cases = cases_str[0] ? (long double)strtod(cases_str, NULL) : 0.0L;
+        ctx->countries[ctx->country_count].total_deaths = deaths_str[0] ? (long double)strtod(deaths_str, NULL) : 0.0L;
+        ctx->countries[ctx->country_count].seen = 1;
+        ctx->country_count++;
+    }
+}
+
 int main(int argc, char **argv) {
     const char *csv_path = (argc > 1) ? argv[1] : "owid-covid-data.csv";
-    FILE *fp = fopen(csv_path, "r");
+    FILE *fp = fopen(csv_path, "rb");
 
     if (!fp) {
         fprintf(stderr, "Nao foi possivel abrir o arquivo: %s\n", csv_path);
         return 1;
     }
 
-    char line[MAX_LINE];
-    if (!fgets(line, sizeof(line), fp)) {
-        fprintf(stderr, "Arquivo vazio.\n");
-        fclose(fp);
+    ProcessingContext ctx;
+    memset(&ctx, 0, sizeof(ctx));
+
+    CSVParser parser;
+    CSVParser_init(&parser);
+
+    char buffer[8192];
+    size_t bytes_read;
+
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+        CSVParser_processLines(&parser, buffer, (int)bytes_read, process_row, &ctx);
+    }
+
+    fclose(fp);
+    CSVParser_processLines(&parser, "\n", 1, process_row, &ctx);
+
+    if (!ctx.header_read) {
+        fprintf(stderr, "Arquivo vazio ou sem cabecalho.\n");
         return 1;
     }
 
-    char *header_fields[MAX_FIELDS];
-    int header_count = split_csv_line(line, header_fields, MAX_FIELDS);
-
-    int continent_idx = find_column_index(header_fields, header_count, "continent");
-    int location_idx = find_column_index(header_fields, header_count, "location");
-    int date_idx = find_column_index(header_fields, header_count, "date");
-    int cases_idx = find_column_index(header_fields, header_count, "total_cases");
-    int deaths_idx = find_column_index(header_fields, header_count, "total_deaths");
-
-    if (continent_idx < 0 || location_idx < 0 || date_idx < 0 || cases_idx < 0 || deaths_idx < 0) {
+    if (ctx.continent_idx < 0 || ctx.location_idx < 0 || ctx.date_idx < 0 ||
+        ctx.cases_idx < 0 || ctx.deaths_idx < 0) {
         fprintf(stderr, "Colunas esperadas nao foram encontradas no CSV.\n");
-        fclose(fp);
         return 1;
-    }
-
-    CountryStats countries[MAX_LOCATIONS];
-    int country_count = 0;
-
-    while (fgets(line, sizeof(line), fp)) {
-        char *fields[MAX_FIELDS];
-        int field_count = split_csv_line(line, fields, MAX_FIELDS);
-
-        if (field_count <= 0) {
-            continue;
-        }
-
-        if (continent_idx >= field_count || location_idx >= field_count || date_idx >= field_count ||
-            cases_idx >= field_count || deaths_idx >= field_count) {
-            continue;
-        }
-
-        if (strcmp(fields[continent_idx], "South America") != 0) {
-            continue;
-        }
-
-        const char *location = fields[location_idx];
-        const char *date = fields[date_idx];
-
-        int found = 0;
-        for (int i = 0; i < country_count; ++i) {
-            if (strcmp(countries[i].location, location) == 0) {
-                found = 1;
-                if (!countries[i].seen || is_newer_date(date, countries[i].date)) {
-                    strncpy(countries[i].date, date, sizeof(countries[i].date) - 1);
-                    countries[i].date[sizeof(countries[i].date) - 1] = '\0';
-                    countries[i].total_cases = fields[cases_idx][0] ? (long double)strtod(fields[cases_idx], NULL) : 0.0L;
-                    countries[i].total_deaths = fields[deaths_idx][0] ? (long double)strtod(fields[deaths_idx], NULL) : 0.0L;
-                    countries[i].seen = 1;
-                }
-                break;
-            }
-        }
-
-        if (!found) {
-            if (country_count >= MAX_LOCATIONS) {
-                break;
-            }
-            strncpy(countries[country_count].location, location, MAX_NAME - 1);
-            countries[country_count].location[MAX_NAME - 1] = '\0';
-            strncpy(countries[country_count].date, date, sizeof(countries[country_count].date) - 1);
-            countries[country_count].date[sizeof(countries[country_count].date) - 1] = '\0';
-            countries[country_count].total_cases = fields[cases_idx][0] ? (long double)strtod(fields[cases_idx], NULL) : 0.0L;
-            countries[country_count].total_deaths = fields[deaths_idx][0] ? (long double)strtod(fields[deaths_idx], NULL) : 0.0L;
-            countries[country_count].seen = 1;
-            country_count++;
-        }
     }
 
     long double total_cases = 0.0L;
     long double total_deaths = 0.0L;
 
-    for (int i = 0; i < country_count; ++i) {
-        total_cases += countries[i].total_cases;
-        total_deaths += countries[i].total_deaths;
+    for (int i = 0; i < ctx.country_count; ++i) {
+        total_cases += ctx.countries[i].total_cases;
+        total_deaths += ctx.countries[i].total_deaths;
     }
 
     printf("Total de casos na America do Sul: %.0Lf\n", total_cases);
     printf("Total de mortes na America do Sul: %.0Lf\n", total_deaths);
 
-    fclose(fp);
     return 0;
 }
